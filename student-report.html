@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance Markdown Converter</title>
+<style>
+    body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #f0f2f5;
+        margin: 0;
+        padding: 2rem;
+        color: #333;
+    }
+    h1 {
+        text-align: center;
+        margin-bottom: 1.5rem;
+        color: #2c3e50;
+    }
+    .textarea-container {
+        margin-bottom: 1.5rem;
+    }
+    label {
+        font-weight: bold;
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #34495e;
+    }
+    textarea {
+        width: 100%;
+        min-height: 150px;
+        padding: 1rem;
+        font-family: monospace;
+        font-size: 14px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        box-sizing: border-box;
+        resize: vertical;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    textarea:focus {
+        border-color: #3498db;
+        box-shadow: 0 0 5px rgba(52,152,219,0.4);
+        outline: none;
+    }
+    .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-top: 0.5rem;
+    }
+    button {
+        flex: 1;
+        min-width: 150px;
+        padding: 0.8rem 1rem;
+        border: none;
+        border-radius: 5px;
+        background-color: #3498db;
+        color: #fff;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background-color 0.2s, transform 0.1s;
+    }
+    button:hover {
+        background-color: #2980b9;
+        transform: translateY(-2px);
+    }
+    button:active {
+        transform: translateY(0);
+    }
+    #message {
+        margin-top: 1rem;
+        text-align: center;
+        font-weight: bold;
+    }
+</style>
+</head>
+<body>
+
+<h1>Attendance Markdown Converter</h1>
+
+<div class="textarea-container">
+    <label for="textarea1">Raw Attendance Data</label>
+    <textarea id="textarea1" placeholder="Paste your raw attendance table here..."></textarea>
+</div>
+
+<div class="textarea-container">
+    <label for="textarea2">Factual Attendance Summary</label>
+    <textarea id="textarea2" placeholder="Add your factual summary here..."></textarea>
+</div>
+
+<div class="textarea-container">
+    <label for="textarea3">Pattern and Behavior Analysis</label>
+    <textarea id="textarea3" placeholder="Add pattern and behavior analysis here..."></textarea>
+</div>
+
+<div class="buttons">
+    <button id="copyPrompt1">Copy Prompt 1</button>
+    <button id="copyPrompt2">Copy Prompt 2</button>
+    <button id="copyPrompt3">Copy Prompt 3</button>
+</div>
+
+<div id="message"></div>
+
+<script>
+// --- Helper Functions ---
+function sanitizeInput(text){
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeMarkdownChars(text){
+    return (text||"").replace(/\|/g,"\\|");
+}
+
+function columnWidth(rows, index){
+    return Math.max(...rows.map(row => ("" + escapeMarkdownChars(row[index])).length));
+}
+
+function detectFormat(text){
+    const hasPipe = text.includes("|");
+    const hasTab = text.includes("\t");
+    if(hasPipe && !hasTab) return "markdown";
+    return "excel";
+}
+
+function markdownToExcel(text){
+    return text.split("\n")
+        .filter(line => !line.match(/^\s*\|[-:]+\|/))
+        .map(line => line.trim().replace(/^\||\|$/g,"")
+            .split(/(?<!\\)\|/)
+            .map(cell => cell.trim().replace(/\\\|/g,"|"))
+            .join("\t"))
+        .join("\n");
+}
+
+function showMessage(msg, color){
+    const message = document.getElementById("message");
+    message.textContent = msg;
+    message.style.color = color;
+    setTimeout(() => { message.textContent = ""; }, 4000);
+}
+
+// --- Textarea Elements ---
+const textarea1 = document.getElementById("textarea1");
+const textarea2 = document.getElementById("textarea2");
+const textarea3 = document.getElementById("textarea3");
+
+// --- Markdown Conversion on Paste (Textarea 1) ---
+textarea1.addEventListener("paste", function(e){
+    const clipboardData = e.clipboardData || window.clipboardData;
+    let text = clipboardData.getData("text/plain");
+    text = sanitizeInput(text).replace(/(?:[\n\u0085\u2028\u2029]|\r\n?)$/,"");
+    
+    const format = detectFormat(text);
+    e.preventDefault();
+
+    if(format === "markdown"){
+        const converted = markdownToExcel(text);
+        textarea1.value = converted;
+        textarea1.style.backgroundColor = "#e6ffe6";
+        return;
+    }
+
+    // Excel/TSV → Markdown conversion
+    const rows = text.split(/\r?\n/).map(line => line.split("\t"));
+    if(!rows.length || !rows[0].length){
+        showMessage("No valid table data found.", "red");
+        return;
+    }
+
+    const alignments = [];
+    const colWidths = rows[0].map((cell, i) => {
+        let align = "l"; // default left
+        const match = cell.match(/^(\^[lcr])/i);
+        if(match){
+            const c = match[1][1].toLowerCase();
+            align = c === "c" ? "c" : c === "r" ? "r" : "l";
+        }
+        alignments.push(align);
+        rows[0][i] = cell.replace(/^(\^[lcr])/i,"");
+        return columnWidth(rows, i);
+    });
+
+    const markdownRows = rows.map(row => "| " + row.map((cell, i) => {
+        cell = escapeMarkdownChars(cell);
+        return cell + " ".repeat(colWidths[i] - cell.length);
+    }).join(" | ") + " |");
+
+    const separator = "|" + colWidths.map((w, i) => {
+        const a = alignments[i];
+        if(a==="r") return "-".repeat(w) + ":";
+        if(a==="c") return ":" + "-".repeat(Math.max(w-2, 0)) + ":";
+        return "-".repeat(w);
+    }).join("|") + "|";
+    markdownRows.splice(1,0,separator);
+
+    const result = markdownRows.join("\n");
+    textarea1.value = result;
+    textarea1.style.backgroundColor = "#e6ffe6";
+});
+
+// --- Copy Prompt Buttons ---
+document.getElementById("copyPrompt1").addEventListener("click", () => {
+    const text = `You are given raw attendance data of a student in tabular form (date, in-time, out-time, worked hours, missing hours, remarks).
+
+Assume:
+
+- The Standard working day starts at **8:00am**
+- The Standard working day starts at **4:00pm**
+- **Sundays are off days**
+- Days marked **“Leave”** are approved leaves
+- Days marked **“Absent”** are unapproved absences
+
+Your task is to generate a **FACTUAL ATTENDANCE SUMMARY ONLY**.
+
+Rules:
+
+- Do **not** interpret behavior
+- Do **not** assign causes or intent
+- Do **not** give advice
+
+Output the following sections:
+
+### 1. Date Range & Assumptions
+
+### 2. Calendar Breakdown
+- Total calendar days
+- Sundays / off days
+- Approved leaves
+- Expected working days
+
+### 3. Attendance Counts
+- Days present (any recorded attendance)
+- Unapproved absence days
+- Attendance and absence percentages
+
+### 4. Work Hours Totals
+- Expected total hours
+- Actual total hours worked
+- Total missing or excess hours
+
+### 5. Day-Type Distribution
+- Full days (≥95% of standard day hours)
+- Near-full days (75–94.99% of standard day hours)
+- Short days (30–74.99% of standard day hours)
+- Very short / incomplete days (<29.99% of standard day hours)
+- Zero-hour days
+
+Ensure all calculations are explicit and internally consistent.
+
+
+=-=-=- Raw Attendance Data - Start =-=-=-
+${textarea1.value}
+=-=-=- Raw Attendance Data - End =-=-=-`;
+    navigator.clipboard.writeText(text).then(() => showMessage("Prompt 1 copied!", "green"))
+    .catch(() => showMessage("Failed to copy Prompt 1.", "red"));
+});
+
+document.getElementById("copyPrompt2").addEventListener("click", () => {
+    const text = `You are given a **factual attendance summary** generated from raw data.
+
+Your task is to identify **observable patterns and trends** strictly based on the facts provided.
+
+Rules:
+
+- Do not judge character or motivation
+- Do not give teaching advice
+- Use neutral, evidence-based language (e.g., “indicates,” “suggests,” “appears”)
+
+Analyze and report on:
+
+### 1. Attendance Regularity
+- Consistency vs. volatility
+- Is presence stable, improving, declining, or irregular?
+
+### 2. Absence Distribution
+- Is absence isolated, clustered, or continuous?
+- Any recovery or rebound patterns?
+
+### 3. Time Discipline Patterns
+- Arrival trends (early, on-time, late, shifting)
+- Departure trends (full duration vs. early exits)
+
+### 4. Workday Quality
+- Dominant day types
+- Balance between full, partial, and minimal days
+
+### 5. Overall Engagement Signal
+- Does the data reflect full engagement, partial engagement, or unstable engagement?
+
+Clearly separate **observations** from **inferences**, and note uncertainty where applicable.
+
+
+
+=-=-=- Factual Attendance Summary - Start =-=-=-
+${textarea2.value}
+=-=-=- Factual Attendance Summary - End =-=-=-
+
+=-=-=- Raw Attendance Data - Start =-=-=-
+${textarea1.value}
+=-=-=- Raw Attendance Data - End =-=-=-`;
+    navigator.clipboard.writeText(text).then(() => showMessage("Prompt 2 copied!", "green"))
+    .catch(() => showMessage("Failed to copy Prompt 2.", "red"));
+});
+
+document.getElementById("copyPrompt3").addEventListener("click", () => {
+    const text = `You are given:
+
+1. A **factual attendance summary**
+2. A **pattern and behavior analysis**
+
+Your task is to produce a **student-centric Attendance & Professionalism Report** using the fixed + flexible structure below.
+
+Maintain a **supportive, fair, and developmental tone**.
+Do not assume intent; base all guidance strictly on observed data.
+
+### STRUCTURE TO FOLLOW:
+
+## 1. Context & Standards
+
+- Period covered
+- Attendance expectations
+
+## 2. Attendance Facts (Brief Summary)
+
+- Key numbers only (presence, absences, hours)
+
+## 3. Observed Patterns
+
+- Key consistency, timing, and engagement trends
+
+## 4. Professional Readiness Indicators
+
+- Positive indicators (if present)
+- Risk or growth indicators (if present)
+
+## 5. Teaching & Mentoring Focus
+
+- What to reinforce
+- What to guide or correct
+- Level of response needed (monitoring / coaching / structured intervention)
+
+## 6. Measurable, Supportive Goals
+
+- Short-term goals
+- Mid-term goals
+- How progress should be reviewed
+
+## Overall Synthesis (1 paragraph)
+
+- Clear, balanced takeaway focused on growth potential
+
+Ensure the report remains **human, respectful, and actionable**.
+
+
+
+=-=-=- Pattern and Behavior Analysis - Start =-=-=-
+${textarea3.value}
+=-=-=- Pattern and Behavior Analysis - End =-=-=-
+
+=-=-=- Factual Attendance Summary - Start =-=-=-
+${textarea2.value}
+=-=-=- Factual Attendance Summary - End =-=-=-
+
+=-=-=- Raw Attendance Data - Start =-=-=-
+${textarea1.value}
+=-=-=- Raw Attendance Data - End =-=-=-`;
+    navigator.clipboard.writeText(text).then(() => showMessage("Prompt 3 copied!", "green"))
+    .catch(() => showMessage("Failed to copy Prompt 3.", "red"));
+});
+</script>
+
+</body>
+</html>
